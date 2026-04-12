@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bowed-physics"
+version = "0.1.0"
+description = "Research and educational physical models of bowed instruments (strings, plates, resonators)."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Julius O. Smith III" }]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.23",
+    "scipy>=1.9",
+    "matplotlib>=3.6",
+    "pillow>=9.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

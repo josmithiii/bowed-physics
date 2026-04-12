@@ -1,0 +1,23 @@
+build/
+build-*/
+cmake-build-*/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# Experiment outputs
+png/
+eps/
+*.wav
+seestr_meta.txt
+*seestr_meta.txt
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+compile_commands.json
