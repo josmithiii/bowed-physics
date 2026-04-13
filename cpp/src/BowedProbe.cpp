@@ -6,7 +6,8 @@ namespace stk {
 //   bridgeDelay->delay()              -> bridgeDelay_.getDelay()
 //   bridgeDelay->contentsAtNowMinus() -> bridgeDelay_.tapOut()
 //   bridgeDelay->lastOut()            -> bridgeDelay_.lastOut()
-StkFloat BowedProbe::stringVelocityAtPosition(int p)
+std::pair<StkFloat, StkFloat>
+BowedProbe::stringVelocityWavesAtPosition(int p)
 {
   int bdelrt = (int)bridgeDelay_.getDelay() + 1; // bow->bridge->bow + p.l. delay
   int ndelrt = (int)neckDelay_.getDelay()   + 1; // bow->nut->bow    + p.l. delay
@@ -35,7 +36,26 @@ StkFloat BowedProbe::stringVelocityAtPosition(int p)
       leftGoingAtP = -neckDelay_.lastOut();
     }
   }
-  return rightGoingAtP + leftGoingAtP;
+  return std::make_pair(rightGoingAtP, leftGoingAtP);
+}
+
+StkFloat BowedProbe::stringVelocityAtPosition(int p)
+{
+  std::pair<StkFloat, StkFloat> w = stringVelocityWavesAtPosition(p);
+  return w.first + w.second;  // v⁺ + v⁻
+}
+
+StkFloat BowedProbe::stringForceAtPosition(int p)
+{
+  std::pair<StkFloat, StkFloat> w = stringVelocityWavesAtPosition(p);
+  return w.first - w.second;  // v⁺ - v⁻  (with R = 1)
+}
+
+std::pair<StkFloat, StkFloat>
+BowedProbe::stringForceWavesAtPosition(int p)
+{
+  std::pair<StkFloat, StkFloat> w = stringVelocityWavesAtPosition(p);
+  return std::make_pair(w.first, -w.second);  // {f⁺, f⁻} with R = 1
 }
 
 } // namespace stk

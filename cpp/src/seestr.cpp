@@ -20,10 +20,18 @@
 //                Use 0.3333 to bow at 1/3 of the string length.
 //     prefix   : prepended to all three output filenames   (default "")
 //
-// The string-state assembly loop is the 1997 appendix fragment adapted
-// to modern STK. Velocity integration runs every audio sample (else the
-// waveguide's audio-rate velocity aliases into the integral and drifts);
-// `stride` only decimates which snapshots get written.
+// The string-state assembly loop reconstructs displacement u(x) by
+// spatially integrating slope = -force at each emit frame. (The 1997
+// appendix version integrated velocity in time per spatial sample,
+// which runs N independent integrators with no coupling; any DC
+// asymmetry in the bow injection then drives the two halves of the
+// string apart, producing a growing *displacement* jump at the bow.)
+//
+// With R = T = 1, slope u_x = -(v⁺ - v⁻) = -force. Integrating slope
+// from j=0 gives u(j). A residual linear ramp is subtracted so both
+// endpoints are pinned (u(0) = u(ilen-1) = 0); under exact arithmetic
+// that ramp would be zero, so its magnitude is a direct numerical-
+// health check.
 
 #include "bowed_physics/BowedProbe.h"
 #include "FileWvOut.h"
@@ -32,9 +40,12 @@
 #define BP_STK_RAWWAVES_PATH "./external/stk/rawwaves/"
 #endif
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -60,9 +71,10 @@ int main(int argc, char** argv)
   const int      ilen = (int)(Stk::sampleRate() / freq / 2.0);   // bdel+ndel
   const int      warmupSamples = 4000;                           // past ADSR attack
   const StkFloat bowPressureCC = 128.0;                          // max sticking
-  const StkFloat vscale = 1.0;
-  const StkFloat STRINGSCALING = 0.5;
-  const StkFloat ONE_OVER_SRATE = 1.0 / Stk::sampleRate();
+  // Spatial integration of slope accumulates ilen terms, so the raw
+  // scale is larger than the old per-sample time-integrator version.
+  // This keeps snapshots well inside the [-1,1] WAV range for ilen≈100.
+  const StkFloat STRINGSCALING = 0.02;
 
   const int totalSamples = (int)(duration * Stk::sampleRate());
   const int nFrames = totalSamples / stride;
@@ -79,15 +91,76 @@ int main(int argc, char** argv)
 
   std::vector<StkFloat> stringState(ilen, 0.0);
 
+  // Expected endpoint residual from roundoff: each add loses ~0.5 ulp
+  // relative, and the sum is over `ilen` terms; under a random-walk
+  // model the residual scales as sqrt(ilen)*ulp*peak, worst case
+  // ilen*ulp*peak. Warn when we exceed a generous 16*sqrt(ilen) factor.
+  const StkFloat ULP = std::numeric_limits<StkFloat>::epsilon();
+  const StkFloat noiseFactor = 16.0 * std::sqrt((StkFloat)ilen) * ULP;
+  StkFloat worstResidual = 0.0;       // max |uEnd| / peak
+  StkFloat worstResidualAbs = 0.0;    // max |uEnd|
+  int worstResidualFrame = -1;
+  int framesOverThreshold = 0;
+  bool reportedFirst = false;
+
   for (int i = 0; i < totalSamples; ++i) {
     StkFloat y = vln.tick();
     audioOut.tick(y);
-    const bool emit = (i % stride == 0);
+    if (i % stride != 0) continue;
+
+    // 1. Spatially integrate slope = -force from j = 0.
+    StkFloat u = 0.0;
+    StkFloat peak = 0.0;
     for (int j = 0; j < ilen; ++j) {
-      StkFloat v = vscale * vln.stringVelocityAtPosition(j);
-      stringState[j] += v * ONE_OVER_SRATE;
-      if (emit) stringOut.tick(STRINGSCALING * stringState[j]);
+      stringState[j] = u;
+      u += -vln.stringForceAtPosition(j);   // slope, R = T = 1
+      peak = std::max(peak, std::fabs(stringState[j]));
     }
+    peak = std::max(peak, std::fabs(u));
+
+    // 2. Subtract linear ramp so u(0) = u(ilen-1) = 0. stringState[0]
+    //    is already 0 by construction; only the slope needs removing.
+    const StkFloat uEnd = stringState[ilen - 1];
+    const StkFloat invN = 1.0 / (StkFloat)(ilen - 1);
+    for (int j = 0; j < ilen; ++j) {
+      stringState[j] -= (StkFloat)j * invN * uEnd;
+    }
+
+    // 3. Numerical-health check: how big is the residual we just
+    //    subtracted, relative to the peak displacement on the string?
+    const StkFloat residualRel = (peak > 0.0) ? std::fabs(uEnd) / peak : 0.0;
+    if (residualRel > worstResidual) {
+      worstResidual = residualRel;
+      worstResidualAbs = std::fabs(uEnd);
+      worstResidualFrame = i / stride;
+    }
+    if (residualRel > noiseFactor) {
+      ++framesOverThreshold;
+      if (!reportedFirst) {
+        std::cerr << "*** spatial-integration residual " << residualRel
+                  << " > expected " << noiseFactor
+                  << " first at frame " << (i / stride)
+                  << " (peak=" << peak << ", uEnd=" << uEnd << ")\n";
+        reportedFirst = true;
+      }
+    }
+
+    for (int j = 0; j < ilen; ++j) {
+      stringOut.tick(STRINGSCALING * stringState[j]);
+    }
+  }
+
+  std::cout << "Worst endpoint residual: |uEnd|=" << worstResidualAbs
+            << ", |uEnd|/peak=" << worstResidual
+            << " at frame " << worstResidualFrame
+            << "  (roundoff threshold " << noiseFactor
+            << ", " << framesOverThreshold << "/" << nFrames
+            << " frames over)\n";
+  if (framesOverThreshold > 0) {
+    std::cout << "  note: residual >> roundoff means the raw slope field "
+                 "has non-numerical DC (e.g. bow-drive DC in the "
+                 "velocity waveguide) — the ramp subtraction is doing "
+                 "real work, not just cleaning noise.\n";
   }
 
   vln.noteOff(0.5);
@@ -110,7 +183,7 @@ int main(int argc, char** argv)
   std::cout << "duration=" << duration << "s  stride=" << stride
             << "  beta=" << beta
             << "  nFrames=" << nFrames << "  ilen=" << ilen
-            << "  dt_per_frame=" << (stride * ONE_OVER_SRATE * 1e3) << " ms\n";
+            << "  dt_per_frame=" << (stride * 1e3 / Stk::sampleRate()) << " ms\n";
   std::cout << "Wrote " << prefix << "bowed_out.wav, "
             << prefix << "string_out.wav, " << metaPath << '\n';
   return 0;
