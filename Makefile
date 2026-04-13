@@ -45,6 +45,12 @@ run-seestr rs: seestr ## Run the STK bowed string probe (default β≈0.127 near
 view-seestr vs: ## Animate build/string_out.wav with the viewer
 	python3 viewers/seestr.py --build-dir $(BUILD)
 
+run-bow2 rb2: seestr ## Run the STK bowed string probe at β=1/2 (segment ratio 1:1)
+	cd $(BUILD) && ./seestr 1.0 40 0.5000000 "bow2_"
+
+view-bow2 vb2: ## Animate the bow2_ experiment's output
+	python3 viewers/seestr.py --prefix bow2_ --build-dir $(BUILD)
+
 run-bow3 rb3: seestr ## Run the STK bowed string probe at β=1/3 (segment ratio 1:2)
 	cd $(BUILD) && ./seestr 1.0 40 0.3333333 "bow3_"
 

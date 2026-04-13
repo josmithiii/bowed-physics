@@ -52,6 +52,7 @@ def main() -> None:
 
     build = Path(args.build_dir)
     wav_path = build / f"{args.prefix}string_out.wav"
+    vel_path = build / f"{args.prefix}string_vel_out.wav"
     meta_path = build / f"{args.prefix}seestr_meta.txt"
 
     meta = load_meta(meta_path)
@@ -64,32 +65,59 @@ def main() -> None:
     dt = stride / fs
     total_t = nframes * dt
 
-    _, data = wavfile.read(wav_path)
-    if data.dtype.kind in "iu":
-        data = data.astype(float) / np.iinfo(data.dtype).max
-    else:
-        data = data.astype(float)
+    def load_wav(path: Path) -> np.ndarray | None:
+        if not path.exists():
+            return None
+        _, d = wavfile.read(path)
+        if d.dtype.kind in "iu":
+            d = d.astype(float) / np.iinfo(d.dtype).max
+        else:
+            d = d.astype(float)
+        return d
+
+    data = load_wav(wav_path)
+    if data is None:
+        sys.exit(f"*** {wav_path} not found — run `make run-seestr` first")
+    vel_data = load_wav(vel_path)
 
     usable_frames = min(nframes, len(data) // M)
+    if vel_data is not None:
+        usable_frames = min(usable_frames, len(vel_data) // M)
 
     fig, ax = plt.subplots()
     plt.subplots_adjust(bottom=0.22)
-    ymin, ymax = float(data.min()), float(data.max())
+    ymin = float(data.min())
+    ymax = float(data.max())
+    if vel_data is not None:
+        ymin = min(ymin, float(vel_data.min()))
+        ymax = max(ymax, float(vel_data.max()))
     yspan = max(ymax - ymin, 1e-12)
     ax.set_xlim(0, M - 1)
     ax.set_ylim(ymin - 0.05 * yspan, ymax + 0.05 * yspan)
     ax.set_xlabel("position along string (spatial samples)")
-    ax.set_ylabel("displacement")
+    ax.set_ylabel("displacement / velocity")
+    ax.axhline(0.0, color="0.6", lw=0.8, ls="-", zorder=0)
     if beta is not None:
-        ax.axvline(beta * M, color="tab:red", alpha=0.35, lw=1, ls="--",
+        ax.axvline(beta * M, color="saddlebrown", alpha=0.7, lw=1.5, ls="--",
                    label=f"bow (β={beta:.3f})")
-        ax.legend(loc="upper right", fontsize=8)
-    (line,) = ax.plot(np.arange(M), data[:M], marker="*", markersize=4)
+    xs = np.arange(M)
+    (line,) = ax.plot(xs, data[:M], color="tab:blue",
+                      marker="*", markersize=4, label="displacement")
+    vel_line = None
+    if vel_data is not None:
+        (vel_line,) = ax.plot(xs, vel_data[:M], color="tab:red",
+                              marker="*", markersize=4, label="velocity")
+    ax.legend(loc="upper right", fontsize=8)
     title = ax.set_title("")
 
-    slider_ax = plt.axes([0.15, 0.06, 0.7, 0.04])
+    slider_ax = plt.axes([0.15, 0.08, 0.7, 0.04])
     speed_slider = Slider(
         ax=slider_ax, label="ms/frame", valmin=1, valmax=200, valinit=50, valstep=1
+    )
+    fig.text(
+        0.5, 0.015,
+        "[space] pause/resume     [←/→] step frame (while paused)",
+        ha="center", va="bottom", fontsize=11, color="0.25",
     )
 
     hdr = f"f1={freq:.1f}Hz"
@@ -99,16 +127,43 @@ def main() -> None:
     def update(frame: int):
         start = frame * M
         line.set_ydata(data[start : start + M])
+        if vel_line is not None:
+            vel_line.set_ydata(vel_data[start : start + M])
         title.set_text(
             f"{hdr}   t = {frame*dt*1e3:7.3f} / {total_t*1e3:7.3f} ms   "
             f"(frame {frame}/{usable_frames})"
         )
         return line, title
 
+    state = {"paused": False, "frame": 0}
+
+    def track_frame(frame: int):
+        state["frame"] = frame
+        return update(frame)
+
     ani = FuncAnimation(
-        fig, update, frames=usable_frames, interval=50, blit=False, repeat=True
+        fig, track_frame, frames=usable_frames, interval=50, blit=False, repeat=True
     )
     speed_slider.on_changed(lambda v: setattr(ani.event_source, "interval", float(v)))
+
+    def step(delta: int):
+        state["frame"] = (state["frame"] + delta) % usable_frames
+        update(state["frame"])
+        fig.canvas.draw_idle()
+
+    def on_key(event):
+        if event.key == " ":
+            if state["paused"]:
+                ani.event_source.start()
+            else:
+                ani.event_source.stop()
+            state["paused"] = not state["paused"]
+        elif event.key == "right" and state["paused"]:
+            step(+1)
+        elif event.key == "left" and state["paused"]:
+            step(-1)
+
+    fig.canvas.mpl_connect("key_press_event", on_key)
 
     plt.show()
 

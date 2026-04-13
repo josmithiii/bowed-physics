@@ -75,6 +75,7 @@ int main(int argc, char** argv)
   // scale is larger than the old per-sample time-integrator version.
   // This keeps snapshots well inside the [-1,1] WAV range for ilen≈100.
   const StkFloat STRINGSCALING = 0.02;
+  const StkFloat VELOCITYSCALING = 0.5;
 
   const int totalSamples = (int)(duration * Stk::sampleRate());
   const int nFrames = totalSamples / stride;
@@ -86,8 +87,9 @@ int main(int argc, char** argv)
 
   for (int i = 0; i < warmupSamples; ++i) (void)vln.tick();
 
-  FileWvOut audioOut (prefix + "bowed_out",  1, FileWrite::FILE_WAV, Stk::STK_SINT16);
-  FileWvOut stringOut(prefix + "string_out", 1, FileWrite::FILE_WAV, Stk::STK_FLOAT32);
+  FileWvOut audioOut (prefix + "bowed_out",      1, FileWrite::FILE_WAV, Stk::STK_SINT16);
+  FileWvOut stringOut(prefix + "string_out",     1, FileWrite::FILE_WAV, Stk::STK_FLOAT32);
+  FileWvOut stringVelOut(prefix + "string_vel_out", 1, FileWrite::FILE_WAV, Stk::STK_FLOAT32);
 
   std::vector<StkFloat> stringState(ilen, 0.0);
 
@@ -147,6 +149,7 @@ int main(int argc, char** argv)
 
     for (int j = 0; j < ilen; ++j) {
       stringOut.tick(STRINGSCALING * stringState[j]);
+      stringVelOut.tick(VELOCITYSCALING * vln.stringVelocityAtPosition(j));
     }
   }
 
@@ -185,6 +188,8 @@ int main(int argc, char** argv)
             << "  nFrames=" << nFrames << "  ilen=" << ilen
             << "  dt_per_frame=" << (stride * 1e3 / Stk::sampleRate()) << " ms\n";
   std::cout << "Wrote " << prefix << "bowed_out.wav, "
-            << prefix << "string_out.wav, " << metaPath << '\n';
+            << prefix << "string_out.wav, "
+            << prefix << "string_vel_out.wav, "
+            << metaPath << '\n';
   return 0;
 }
