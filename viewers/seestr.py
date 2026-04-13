@@ -84,7 +84,7 @@ def main() -> None:
         ax.axvline(beta * M, color="tab:red", alpha=0.35, lw=1, ls="--",
                    label=f"bow (β={beta:.3f})")
         ax.legend(loc="upper right", fontsize=8)
-    (line,) = ax.plot(np.arange(M), data[:M])
+    (line,) = ax.plot(np.arange(M), data[:M], marker="*", markersize=4)
     title = ax.set_title("")
 
     slider_ax = plt.axes([0.15, 0.06, 0.7, 0.04])
