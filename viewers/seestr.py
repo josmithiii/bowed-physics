@@ -16,13 +16,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from pathlib import Path
 
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Slider
 from scipy.io import wavfile
 
@@ -110,12 +108,37 @@ def main() -> None:
     ax.legend(loc="upper right", fontsize=8)
     title = ax.set_title("")
 
-    slider_ax = plt.axes([0.15, 0.08, 0.7, 0.04])
+    plt.subplots_adjust(bottom=0.30)
+
+    # One stored snapshot every `stride` audio samples.
+    dt_ms = stride * 1000.0 / fs
+    # Log-spaced step range:
+    #   left  = one stored frame (the finest resolution the data supports)
+    #   right = one vibration period + 10%
+    ms_step_min = dt_ms
+    ms_step_max = 1100.0 / freq
+
+    rate_ax = plt.axes([0.15, 0.16, 0.7, 0.04])
     speed_slider = Slider(
-        ax=slider_ax, label="ms/frame", valmin=1, valmax=200, valinit=50, valstep=1
+        ax=rate_ax, label="ms/frame", valmin=1, valmax=200, valinit=50, valstep=1
     )
+    step_ax = plt.axes([0.15, 0.09, 0.7, 0.04])
+    # Slider value is log10(ms/step); the visible label shows the
+    # linear ms value.
+    step_slider = Slider(
+        ax=step_ax, label="ms/step",
+        valmin=float(np.log10(ms_step_min)),
+        valmax=float(np.log10(ms_step_max)),
+        valinit=float(np.log10(ms_step_min)),
+        valfmt=None,
+    )
+
+    def format_step_label(log_v: float) -> None:
+        step_slider.valtext.set_text(f"{10.0 ** log_v:.3f} ms")
+
+    format_step_label(step_slider.val)
     fig.text(
-        0.5, 0.015,
+        0.5, 0.02,
         "[space] pause/resume     [←/→] step frame (while paused)",
         ha="center", va="bottom", fontsize=11, color="0.25",
     )
@@ -135,28 +158,50 @@ def main() -> None:
         )
         return line, title
 
-    state = {"paused": False, "frame": 0}
+    # Drive the animation with a plain canvas Timer we control
+    # directly. Some backends (notably macOS) cache the timer's
+    # interval at creation time and ignore later writes even across
+    # stop/start, so on slider change we destroy the old timer and
+    # build a fresh one.
+    state = {"paused": False, "frame": 0, "timer": None, "step_frames": 1}
 
-    def track_frame(frame: int):
-        state["frame"] = frame
-        return update(frame)
+    def tick() -> None:
+        state["frame"] = (state["frame"] + state["step_frames"]) % usable_frames
+        update(state["frame"])
+        fig.canvas.draw_idle()
 
-    ani = FuncAnimation(
-        fig, track_frame, frames=usable_frames, interval=50, blit=False, repeat=True
-    )
-    speed_slider.on_changed(lambda v: setattr(ani.event_source, "interval", float(v)))
+    def make_timer(interval_ms: float):
+        t = fig.canvas.new_timer(interval=max(1, int(interval_ms)))
+        t.add_callback(tick)
+        return t
 
-    def step(delta: int):
-        state["frame"] = (state["frame"] + delta) % usable_frames
+    state["timer"] = make_timer(speed_slider.val)
+
+    def on_speed(v: float) -> None:
+        state["timer"].stop()
+        state["timer"] = make_timer(v)
+        if not state["paused"]:
+            state["timer"].start()
+
+    def on_step(v: float) -> None:
+        ms = 10.0 ** float(v)
+        state["step_frames"] = max(1, int(round(ms / dt_ms)))
+        format_step_label(float(v))
+
+    speed_slider.on_changed(on_speed)
+    step_slider.on_changed(on_step)
+
+    def step(delta: int) -> None:
+        state["frame"] = (state["frame"] + delta * state["step_frames"]) % usable_frames
         update(state["frame"])
         fig.canvas.draw_idle()
 
     def on_key(event):
         if event.key == " ":
             if state["paused"]:
-                ani.event_source.start()
+                state["timer"].start()
             else:
-                ani.event_source.stop()
+                state["timer"].stop()
             state["paused"] = not state["paused"]
         elif event.key == "right" and state["paused"]:
             step(+1)
@@ -164,6 +209,9 @@ def main() -> None:
             step(-1)
 
     fig.canvas.mpl_connect("key_press_event", on_key)
+
+    update(0)
+    state["timer"].start()
 
     plt.show()
 

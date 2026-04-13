@@ -31,8 +31,8 @@ seestr s: configure ## Build just the `seestr` experiment binary
 
 rebuild rb: clean build ## Full clean + rebuild
 
-clean c: ## Remove ./build/
-	rm -rf $(BUILD)
+clean c: ## Remove all build products (./build/, ./png/, ./eps/)
+	rm -rf $(BUILD) png eps
 
 # ------------------------------------------------------------------
 # C++ experiments: STK-based bowed-string probe (ex-ncbs)
@@ -40,19 +40,19 @@ clean c: ## Remove ./build/
 # ------------------------------------------------------------------
 
 run-seestr rs: seestr ## Run the STK bowed string probe (default β≈0.127 near bridge)
-	cd $(BUILD) && ./seestr 0.5 20 0.127236 ""
+	cd $(BUILD) && ./seestr 0.5 1 0.127236 ""
 
 view-seestr vs: ## Animate build/string_out.wav with the viewer
 	python3 viewers/seestr.py --build-dir $(BUILD)
 
 run-bow2 rb2: seestr ## Run the STK bowed string probe at β=1/2 (segment ratio 1:1)
-	cd $(BUILD) && ./seestr 1.0 40 0.5000000 "bow2_"
+	cd $(BUILD) && ./seestr 1.0 1 0.5000000 "bow2_"
 
 view-bow2 vb2: ## Animate the bow2_ experiment's output
 	python3 viewers/seestr.py --prefix bow2_ --build-dir $(BUILD)
 
 run-bow3 rb3: seestr ## Run the STK bowed string probe at β=1/3 (segment ratio 1:2)
-	cd $(BUILD) && ./seestr 1.0 40 0.3333333 "bow3_"
+	cd $(BUILD) && ./seestr 1.0 1 0.3333333 "bow3_"
 
 view-bow3 vb3: ## Animate the bow3_ experiment's output
 	python3 viewers/seestr.py --prefix bow3_ --build-dir $(BUILD)
